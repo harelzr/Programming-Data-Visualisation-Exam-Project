@@ -1,0 +1,402 @@
+install.packages("DBI")
+install.packages("RSQLite")
+install.packages("dplyr")
+install.packages("tidyverse")
+
+#Connecting to the database
+```{r}
+library(DBI)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+filename <- "../data/exam_database.db"
+my_connection <- dbConnect(RSQLite::SQLite(), dbname = filename)
+my_connection
+```
+
+#Showing what tables are in the database
+```{r}
+dbListTables(my_connection)
+# We have 3 tables in our database
+```
+
+#Reading the database into the global environment
+```{r}
+con <- dbConnect(RSQLite::SQLite(), "../data/exam_database.db")
+film_data <- dbGetQuery(con, "SELECT * FROM films")
+```
+
+#Showing what variables (columns) are in each table
+```{sql connection=my_connection}
+SELECT *
+FROM films
+LIMIT 10
+```
+```{sql connection=my_connection}
+SELECT *
+FROM imdb_scores
+LIMIT 10
+```
+```{sql connection=my_connection}
+SELECT *
+FROM rotten_tomatoes_scores
+LIMIT 10
+```
+
+#Confirming the data is between 1970 and 2017 for release_year
+```{sql connection=my_connection}
+SELECT count(*) AS "Number of Films"
+FROM films
+JOIN imdb_scores using (film_id)
+JOIN rotten_tomatoes_scores using (film_id)
+WHERE release_year NOT BETWEEN 1970 AND 2017
+ORDER BY audience_score DESC;
+```
+
+#Transforming data: mutate genre(s) into genre
+```{r}
+names(film_data)
+names(film_data)[names(film_data) == "genre(s)"] <- "genre"
+```
+
+#Finding all genre names 
+```{r}
+film_data <- dbGetQuery(con, "SELECT * FROM films")
+genre_list <- strsplit(film_data$genre, ",")
+genre_names <- unique(unlist(genre_list))
+print(genre_names)
+```
+
+#Finding missing values in rotten tomatoes table
+```{sql connection=my_connection}
+select 
+  sum(film_id is null) as "NULL Film ID",
+  sum(audience_score is null) as "NULL Audience Score",
+  sum(critic_score is null) as "NULL Critic Score"
+from rotten_tomatoes_scores
+```
+
+#Finding missing values in imdb table
+```{sql connection=my_connection}
+select 
+  sum(film_id is null) as "NULL Film ID",
+  sum(score is null) as "NULL IMDB Score",
+  sum(likes is null) as "NULL Likes"
+from imdb_scores
+```
+
+#Finding missing values in rotten tomatoes table
+```{sql connection=my_connection}
+select count(*) as "Missing Likes in IMDB"
+from imdb_scores
+where likes is null;
+```
+
+#Counting how many films in imdb scores that has likes
+```{sql connection=my_connection}
+select count(distinct film_id) as liked_films
+from imdb_scores
+where "likes" not null
+```
+#Finding best film with imdb scores
+```{sql connection=my_connection}
+SELECT films.film_name, AVG(imdb_scores.score) AS avg_imdb_score
+FROM imdb_scores
+JOIN films ON films.film_id = imdb_scores.film_id
+GROUP BY films.film_name
+ORDER BY avg_imdb_score DESC
+LIMIT 10
+```
+#Finding best film with audience scores from rotten tomatoes
+```{sql connection=my_connection}
+SELECT films.film_name, AVG(rotten_tomatoes_scores.audience_score) AS avg_audscore
+FROM rotten_tomatoes_scores
+JOIN films ON films.film_id = rotten_tomatoes_scores.film_id
+GROUP BY films.film_name
+ORDER BY avg_audscore DESC
+LIMIT 10
+```
+#Finding best film with average critic scores from rotten tomatoes - Alphabetical Result (NULL)
+```{sql connection=my_connection}
+SELECT films.film_name, AVG(rotten_tomatoes_scores.critic_score) AS avg_criscore
+FROM rotten_tomatoes_scores
+JOIN films ON films.film_id = rotten_tomatoes_scores.film_id
+GROUP BY films.film_name
+ORDER BY avg_criscore DESC
+LIMIT 10
+```
+#Best films based on critic score is maximised and audience score is best
+```{sql connection=my_connection} 
+SELECT films.*,
+       imdb_scores.score AS imdbscores,
+       imdb_scores.likes AS imdblikes,
+       rotten_tomatoes_scores.audience_score AS rot_audscore,
+       rotten_tomatoes_scores.critic_score AS rot_criscore
+FROM films
+JOIN imdb_scores ON films.film_id = imdb_scores.film_id
+JOIN rotten_tomatoes_scores ON films.film_id = rotten_tomatoes_scores.film_id
+WHERE critic_score is 100 
+ORDER BY audience_score desc
+LIMIT 10
+```
+#Finding worst film with average imdb scores
+```{sql connection=my_connection}
+SELECT films.film_name, AVG(imdb_scores.score) AS avg_imdb_score
+FROM imdb_scores
+JOIN films ON films.film_id = imdb_scores.film_id
+GROUP BY films.film_name
+ORDER BY avg_imdb_score
+LIMIT 10
+```
+#Finding worst film with average audience scores
+```{sql connection=my_connection}
+SELECT films.film_name, AVG(rotten_tomatoes_scores.audience_score) AS avg_audscore
+FROM rotten_tomatoes_scores
+JOIN films ON films.film_id = rotten_tomatoes_scores.film_id
+GROUP BY films.film_name
+ORDER BY avg_audscore 
+LIMIT 10
+```
+#Finding worst film with average critic scores - Alphabetical Result (NULL)
+```{sql connection=my_connection}
+SELECT films.film_name, AVG(rotten_tomatoes_scores.critic_score) AS avg_criscore
+FROM rotten_tomatoes_scores
+JOIN films ON films.film_id = rotten_tomatoes_scores.film_id
+GROUP BY films.film_name
+ORDER BY avg_criscore 
+LIMIT 10
+```
+#Worst films based on critic score is 0 and audience score is worst
+```{sql connection=my_connection} 
+SELECT films.*,
+       imdb_scores.score AS imdbscores,
+       imdb_scores.likes AS imdblikes,
+       rotten_tomatoes_scores.audience_score AS rot_audscore,
+       rotten_tomatoes_scores.critic_score AS rot_criscore
+FROM films
+JOIN imdb_scores ON films.film_id = imdb_scores.film_id
+JOIN rotten_tomatoes_scores ON films.film_id = rotten_tomatoes_scores.film_id
+WHERE critic_score is 0 
+ORDER BY audience_score 
+LIMIT 10
+```
+#Worst films based on where audience and critics scores are minimal and lowest ranking by audience
+```{sql connection=my_connection}
+SELECT *
+FROM films
+JOIN imdb_scores using (film_id)
+JOIN rotten_tomatoes_scores using (film_id)
+WHERE audience_score BETWEEN 0 AND 65
+AND critic_score BETWEEN 0 AND 65
+ORDER BY audience_score 
+LIMIT 10
+```
+#Condensed data showing films with Lowest Total scores
+```{sql connection=my_connection}
+SELECT f.*,
+      imdb.score + rt.audience_score + rt.critic_score AS total_score
+FROM films AS f
+JOIN imdb_scores AS imdb ON f.film_id = imdb.film_id
+JOIN rotten_tomatoes_scores AS rt ON f.film_id = rt.film_id
+ORDER BY total_score ASC
+LIMIT 10
+```
+#Finding best genre with imdb score
+```{sql connection=my_connection}
+SELECT films."genre(s)", COUNT(imdb_scores.score) AS imdbcount
+FROM films
+JOIN imdb_scores ON films.film_id = imdb_scores.film_id
+GROUP BY films."genre(s)"
+ORDER BY imdbcount desc
+LIMIT 10
+```
+#Finding best genre with average audience score from rotten tomatoes
+```{sql connection=my_connection}
+SELECT films."genre(s)", AVG(rotten_tomatoes_scores.audience_score) AS count_audscore
+FROM rotten_tomatoes_scores
+JOIN films ON films.film_id = rotten_tomatoes_scores.film_id
+GROUP BY films.film_name
+ORDER BY count_audscore desc
+```
+#Finding best genre with critic score from rotten tomatoes
+```{sql connection=my_connection}
+SELECT films."genre(s)", AVG(rotten_tomatoes_scores.critic_score) AS count_cri_score
+FROM rotten_tomatoes_scores
+JOIN films ON films.film_id = rotten_tomatoes_scores.film_id
+GROUP BY films.film_name
+ORDER BY count_cri_score desc
+LIMIT 10
+```
+#Highest Ranking Genres
+```{sql connection=my_connection}
+SELECT f."genre(s)" AS "Genre", COUNT(i.score) AS "IMDb Score Count"
+FROM films AS f
+JOIN imdb_scores AS i ON f.film_id = i.film_id
+GROUP BY f."genre(s)"
+ORDER BY "IMDb Score Count" DESC
+LIMIT 1
+```
+#Finding worst genre with imdb score
+```{sql connection=my_connection}
+SELECT films."genre(s)", COUNT(imdb_scores.score) AS imdbcount
+FROM films
+JOIN imdb_scores ON films.film_id = imdb_scores.film_id
+GROUP BY films."genre(s)"
+ORDER BY imdbcount 
+LIMIT 10
+```
+#Finding worst genres with average audience score from rotten tomatoes
+```{sql connection=my_connection}
+SELECT films."genre(s)", AVG(rotten_tomatoes_scores.audience_score) AS count_audscore
+FROM rotten_tomatoes_scores
+JOIN films ON films.film_id = rotten_tomatoes_scores.film_id
+GROUP BY films.film_name
+ORDER BY count_audscore
+```
+#Finding worst genres with critic score from rotten tomatoes
+```{sql connection=my_connection}
+SELECT films."genre(s)", AVG(rotten_tomatoes_scores.critic_score) AS count_cri_score
+FROM rotten_tomatoes_scores
+JOIN films ON films.film_id = rotten_tomatoes_scores.film_id
+GROUP BY films.film_name
+ORDER BY count_cri_score
+LIMIT 10
+```
+#Lowest Ranking Genre
+```{sql connection=my_connection}
+SELECT f."genre(s)" AS "Genre", COUNT(i.score) AS "IMDb Score Count"
+FROM films AS f
+JOIN imdb_scores AS i ON f.film_id = i.film_id
+GROUP BY f."genre(s)"
+ORDER BY "IMDb Score Count"
+LIMIT 1
+```
+#Condensing certain genres
+```{sql connection=my_connection}
+select "genre(s)",
+      case 
+           when "genre(s)" in ('Comedy,Romance', 'Romance,Comedy') then 'Rom-Com'
+           when "genre(s)" in ('Action,Comedy,Family', 'Family,Comedy,Action') then 'Gritty Family Comedy'
+           when "genre(s)" like '%Comedy%' then 'Comedy'
+          when "genre(s)" like '%Romance%' then 'Romance'
+      end as genres_cleaned
+from films as f
+join imdb_scores as imdb on f.film_id = imdb.film_id
+join rotten_tomatoes_scores as rt on f.film_id = rt.film_id
+```
+#Plotting Top 5 Genres by Ranking
+```{r}
+imdb_score_count <- data.frame(
+  genre = c("Comedy,Drama,Romance", "Drama", "Comedy", "Comedy,Drama", "Drama,Romance"),
+  imdb_score_count = c(244, 216, 199, 198, 158))
+
+ggplot(imdb_score_count, aes(x = reorder(genre, -imdb_score_count), y = imdb_score_count)) +
+  geom_bar(stat = "identity", color = "black", fill = "#bada55") +
+  xlab("Genre") +
+  ylab("IMDB Score Count") +
+  ggtitle("Best Genres by Ranking")
+```
+#Plotting Top 5 Genres by IMDB SCORES Ranking
+```{r}
+best_film_imdb <- dbGetQuery(con, "
+SELECT films.film_name, AVG(imdb_scores.score) AS avg_imdb_score
+FROM imdb_scores
+JOIN films ON films.film_id = imdb_scores.film_id
+GROUP BY films.film_name
+ORDER BY avg_imdb_score DESC
+LIMIT 5")
+
+ggplot(best_film_imdb, aes(x = film_name, y = avg_imdb_score)) +
+  geom_bar(stat = "identity", fill = "green") +
+  labs(x = "Film Name", y = "Average IMDB Score") +
+  ggtitle("Best Films by IMDB Scores") +
+  theme_minimal()
+```
+#Plotting Worst Genres by Ranking ????
+```{r}
+imdb_score_count <- data.frame(
+  genre = c("Action,Adventure,Fantasy,Action,Adventure,Fantasy", "Action,Biography,Comedy",	"Action,Biography,Western",			"Action,Comedy,Music", "Action,Comedy,Mystery"),
+  imdb_score_count = c(1, 1, 1, 1, 1))
+
+
+ggplot(imdb_score_count, aes(x = reorder(genre, -imdb_score_count), y = imdb_score_count)) +
+  geom_bar(stat = "identity", color = "black", fill = "#f55555") +
+  xlab("Genre") +
+  ylab("IMDB Score Count") +
+  ggtitle("Worst Genres by Ranking")
+#Note: There are many given scores at 1, precisely from page 1-14 in Lowest Ranking Genres Table
+```
+#Top 5 Best Films by Total Scores
+```{r}
+best_film_ts<- dbGetQuery(con, "
+SELECT f.*,
+       imdb.score as imdb_scores,
+       imdb.likes as imdb_likes,
+       rt.audience_score as rt_audience_score,
+       rt.critic_score as rt_critic_score,
+      imdb.score  + rt.audience_score + rt.critic_score as total_score
+FROM films as f
+JOIN imdb_scores as imdb on f.film_id = imdb.film_id
+JOIN rotten_tomatoes_scores as rt on f.film_id = rt.film_id
+ORDER BY total_score DESC
+LIMIT 5;")
+
+ggplot(best_film_ts, aes(x = film_name, y = total_score)) +
+  geom_bar(stat = "identity", fill = "green") +
+  labs(x = "Film Name", y = "Total Score") +
+  ggtitle("Best Films rated by Total Scores") +
+  theme_minimal()
+```
+#Worst Films by Total Scores
+```{r}
+worst_filmts_visualisation <- dbGetQuery(con, "
+SELECT f.*,
+       imdb.score as imdb_scores,
+       imdb.likes as imdb_likes,
+       rt.audience_score as rt_audience_score,
+       rt.critic_score as rt_critic_score,
+      imdb.score  + rt.audience_score + rt.critic_score as total_score
+FROM films as f
+JOIN imdb_scores as imdb on f.film_id = imdb.film_id
+JOIN rotten_tomatoes_scores as rt on f.film_id = rt.film_id
+ORDER BY total_score
+LIMIT 5;")
+
+ggplot(worst_filmts_visualisation, aes(x = film_name, y = total_score)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(x = "Film Name", y = "Total Score") +
+  ggtitle("Worst Films rated by Total Scores") +
+  theme_minimal()
+```
+#Lowest 5 Films by IMDB Scores
+```{r}
+worst_film_imdb <- dbGetQuery(con, "
+SELECT films.film_name, AVG(imdb_scores.score) AS avg_imdb_score
+FROM imdb_scores
+JOIN films ON films.film_id = imdb_scores.film_id
+GROUP BY films.film_name
+ORDER BY avg_imdb_score
+LIMIT 5")
+
+ggplot(worst_film_imdb, aes(x = film_name, y = avg_imdb_score)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(x = "Film Name", y = "Average IMDB Score") +
+  ggtitle("Worst Films rated by IMDB Scores") +
+  theme_minimal()
+```
+#Lowest 5 Films by Audience
+```{r}
+worst_film_aud <- dbGetQuery(con, "
+SELECT films.film_name, AVG(rotten_tomatoes_scores.audience_score) AS avg_audscore
+FROM rotten_tomatoes_scores
+JOIN films ON films.film_id = rotten_tomatoes_scores.film_id
+GROUP BY films.film_name
+ORDER BY avg_audscore 
+LIMIT 5")
+
+ggplot(worst_film_aud, aes(x = film_name, y = avg_audscore)) +
+  geom_bar(stat = "identity", fill = "red") +
+  labs(x = "Film Name", y = "Average IMDB Score") +
+  ggtitle("Worst Films rated by Audience") +
+  theme_minimal()
+```
